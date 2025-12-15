@@ -13,6 +13,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY server/ .
 
+# Créer les répertoires nécessaires
+RUN mkdir -p downloads /tmp/yt-dlp-cache
+
 # ===== STAGE 2: Frontend Builder =====
 FROM node:20-alpine AS frontend-builder
 

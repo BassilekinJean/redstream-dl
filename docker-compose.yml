@@ -17,6 +17,7 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - FILE_EXPIRY_MINUTES=30
+      - YOUTUBE_DL_OPTS=--socket-timeout 30
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/docs"]
       interval: 30s

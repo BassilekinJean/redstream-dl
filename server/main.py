@@ -181,178 +181,208 @@ def format_error(e: Exception) -> dict:
             "code": "UNKNOWN_ERROR"
         }
 
+def get_yt_dlp_options(skip_download=True):
+    """
+    Retourne les options yt-dlp optimisées pour éviter les blocages YouTube
+    """
+    return {
+        'quiet': False,
+        'no_warnings': False,
+        'skip_download': skip_download,
+        'flat_playlist': False,
+        # === Options anti-blocage YouTube ===
+        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'referer': 'https://www.youtube.com',
+        'socket_timeout': 30,
+        'http_headers': {
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        },
+        # === Gestion des erreurs YouTube ===
+        'extractor_args': {
+            'youtube': {
+                'lang': ['en'],
+                'skip': ['hls', 'dash']
+            }
+        },
+        # === Retry sur erreur ===
+        'socket_timeout': 30,
+        'retries': {'max_tries': 5, 'socket_timeout': 30},
+        'fragment_retries': 10,
+        # === Cache pour éviter les requêtes répétées ===
+        'cache_dir': '/tmp/yt-dlp-cache',
+        'no_cache_dir': False,
+    }
+
 @app.post("/api/info")
 async def get_video_info(request: VideoRequest):
     """Récupère les métadonnées sans télécharger"""
-    ydl_opts = {
-        'quiet': True,
-        'no_warnings': True,
-        'skip_download': True,
-        'extract_flat': False,
-        'ignoreerrors': True,  # Ignorer les erreurs pour les playlists
-    }
+    
+    if not request.url or not request.url.strip():
+        raise HTTPException(status_code=400, detail="URL vide")
     
     try:
+        ydl_opts = get_yt_dlp_options(skip_download=True)
+        
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            print(f"[DEBUG] Extraction des infos pour: {request.url}")
             info = ydl.extract_info(request.url, download=False)
             
-            if info is None:
-                raise HTTPException(status_code=400, detail=format_error(Exception("Impossible d'extraire les informations")))
+            if not info:
+                raise Exception("Impossible d'extraire les informations de la vidéo")
             
-            # Vérifier si c'est une playlist
-            is_playlist = 'entries' in info and info.get('entries')
-            
-            if is_playlist:
-                # Traitement playlist
-                entries = []
-                playlist_formats = []
-                
-                for idx, entry in enumerate(info.get('entries', [])):
-                    if entry is None:
-                        continue
-                    
-                    # Extraire les formats de la première vidéo pour avoir une référence
-                    if idx == 0 and entry.get('formats'):
-                        for f in entry.get('formats', []):
-                            if f.get('filesize') or f.get('filesize_approx') or f.get('format_note'):
-                                playlist_formats.append({
-                                    'format_id': f['format_id'],
-                                    'ext': f['ext'],
-                                    'resolution': f.get('resolution', 'audio only'),
-                                    'filesize': f.get('filesize') or f.get('filesize_approx'),
-                                    'fps': f.get('fps'),
-                                    'vcodec': f.get('vcodec'),
-                                    'acodec': f.get('acodec'),
-                                    'note': f.get('format_note', '')
-                                })
-                    
-                    # Construire l'URL de la vidéo
-                    video_id = entry.get('id')
-                    video_url = f"https://www.youtube.com/watch?v={video_id}" if video_id else entry.get('url', '')
-                    
-                    entries.append({
-                        'id': video_id,
-                        'title': entry.get('title', f'Vidéo {idx + 1}'),
-                        'thumbnail': entry.get('thumbnail'),
-                        'duration': entry.get('duration'),
-                        'uploader': entry.get('uploader'),
-                        'url': video_url,
-                    })
-                
-                # Ajouter des formats génériques garantis
-                generic_formats = [
-                    {'format_id': 'bestvideo+bestaudio/best', 'ext': 'mp4', 'resolution': 'Meilleure qualité', 'filesize': None, 'fps': None, 'vcodec': 'auto', 'acodec': 'auto', 'note': 'Recommandé'},
-                    {'format_id': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]', 'ext': 'mp4', 'resolution': '1080p max', 'filesize': None, 'fps': None, 'vcodec': 'auto', 'acodec': 'auto', 'note': ''},
-                    {'format_id': 'bestvideo[height<=720]+bestaudio/best[height<=720]', 'ext': 'mp4', 'resolution': '720p max', 'filesize': None, 'fps': None, 'vcodec': 'auto', 'acodec': 'auto', 'note': ''},
-                    {'format_id': 'bestvideo[height<=480]+bestaudio/best[height<=480]', 'ext': 'mp4', 'resolution': '480p max', 'filesize': None, 'fps': None, 'vcodec': 'auto', 'acodec': 'auto', 'note': ''},
-                    {'format_id': 'bestaudio/best', 'ext': 'm4a', 'resolution': 'audio only', 'filesize': None, 'fps': None, 'vcodec': 'none', 'acodec': 'auto', 'note': 'Audio uniquement'},
-                ]
-                
-                return {
-                    "id": info.get('id'),
-                    "title": info.get('title', 'Playlist'),
-                    "thumbnail": info.get('thumbnail') or (entries[0]['thumbnail'] if entries else None),
-                    "duration": sum(e.get('duration', 0) or 0 for e in entries),
-                    "uploader": info.get('uploader') or (entries[0]['uploader'] if entries else None),
-                    "is_playlist": True,
-                    "playlist_count": len(entries),
-                    "entries": entries,
-                    "formats": generic_formats  # Utiliser les formats génériques pour les playlists
-                }
-            else:
-                # Traitement vidéo simple
-                formats = []
-                for f in info.get('formats', []):
-                    if f.get('filesize') or f.get('filesize_approx') or f.get('format_note'):
+            # Traitement des formats
+            formats = []
+            if 'formats' in info:
+                for fmt in info.get('formats', []):
+                    try:
                         formats.append({
-                            'format_id': f['format_id'],
-                            'ext': f['ext'],
-                            'resolution': f.get('resolution', 'audio only'),
-                            'filesize': f.get('filesize') or f.get('filesize_approx'),
-                            'fps': f.get('fps'),
-                            'vcodec': f.get('vcodec'),
-                            'acodec': f.get('acodec'),
-                            'note': f.get('format_note', '')
+                            'format_id': fmt.get('format_id'),
+                            'ext': fmt.get('ext', 'unknown'),
+                            'resolution': fmt.get('format', 'unknown'),
+                            'note': fmt.get('format_note', ''),
+                            'filesize': fmt.get('filesize'),
+                            'fps': fmt.get('fps'),
+                            'vcodec': fmt.get('vcodec', 'none'),
+                            'acodec': fmt.get('acodec', 'none'),
                         })
-                
-                # Ajouter les formats génériques en premier
-                generic_formats = [
-                    {'format_id': 'bestvideo+bestaudio/best', 'ext': 'mp4', 'resolution': 'Meilleure qualité', 'filesize': None, 'fps': None, 'vcodec': 'auto', 'acodec': 'auto', 'note': 'Recommandé'},
-                    {'format_id': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]', 'ext': 'mp4', 'resolution': '1080p max', 'filesize': None, 'fps': None, 'vcodec': 'auto', 'acodec': 'auto', 'note': ''},
-                    {'format_id': 'bestvideo[height<=720]+bestaudio/best[height<=720]', 'ext': 'mp4', 'resolution': '720p max', 'filesize': None, 'fps': None, 'vcodec': 'auto', 'acodec': 'auto', 'note': ''},
-                    {'format_id': 'bestaudio/best', 'ext': 'm4a', 'resolution': 'audio only', 'filesize': None, 'fps': None, 'vcodec': 'none', 'acodec': 'auto', 'note': 'Audio uniquement'},
+                    except Exception as e:
+                        print(f"[WARNING] Erreur lors du traitement du format: {e}")
+                        continue
+            
+            # Traitement des formats génériques (fallback)
+            if not formats:
+                formats = [
+                    {'format_id': 'bestvideo+bestaudio/best', 'ext': 'mp4', 'resolution': '1080p max', 'note': 'Recommandé', 'vcodec': 'h264', 'acodec': 'aac'},
+                    {'format_id': '22', 'ext': 'mp4', 'resolution': '720p', 'note': 'Medium Quality', 'vcodec': 'h264', 'acodec': 'aac'},
+                    {'format_id': '18', 'ext': 'mp4', 'resolution': '360p', 'note': 'Low Quality', 'vcodec': 'h264', 'acodec': 'aac'},
                 ]
-                
-                return {
-                    "id": info.get('id'),
-                    "title": info.get('title'),
-                    "thumbnail": info.get('thumbnail'),
-                    "duration": info.get('duration'),
-                    "uploader": info.get('uploader'),
-                    "is_playlist": False,
-                    "formats": generic_formats + formats
+            
+            # Détection playlist
+            is_playlist = 'entries' in info and info['entries'] is not None
+            
+            result = {
+                'id': info.get('id'),
+                'title': info.get('title', 'Sans titre'),
+                'uploader': info.get('uploader', 'Inconnu'),
+                'duration': info.get('duration', 0),
+                'view_count': info.get('view_count', 0),
+                'thumbnail': info.get('thumbnail'),
+                'description': info.get('description', ''),
+                'formats': formats,
+                'is_playlist': is_playlist,
+                'playlist_title': info.get('playlist_title') if is_playlist else None,
+                'playlist_count': len(info['entries']) if is_playlist else None,
+                'entries': []
+            }
+
+            # Traitement des entrées de playlist
+            if is_playlist and info.get('entries'):
+                for i, entry in enumerate(info['entries'][:50]):  # Limiter à 50 entrées
+                    try:
+                        result['entries'].append({
+                            'id': entry.get('id'),
+                            'title': entry.get('title', f'Vidéo {i+1}'),
+                            'duration': entry.get('duration', 0),
+                            'thumbnail': entry.get('thumbnail'),
+                            'url': f"https://www.youtube.com/watch?v={entry.get('id')}"
+                        })
+                    except Exception as e:
+                        print(f"[WARNING] Erreur lors du traitement de l'entrée {i}: {e}")
+                        continue
+            
+            print(f"[SUCCESS] Infos extraites avec succès pour: {result['title']}")
+            return result
+            
+    except Exception as e:
+        error_msg = str(e)
+        print(f"[ERROR] Erreur lors de l'extraction: {error_msg}")
+
+        # Gestion spécifique des erreurs YouTube
+        if "Sign in to confirm you're not a bot" in error_msg:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": "YouTube demande une vérification supplémentaire. Essayez avec une autre vidéo ou réessayez dans quelques minutes.",
+                    "code": "YOUTUBE_BOT_CHECK"
                 }
-    except HTTPException:
-        raise
+            )
+        elif "Video unavailable" in error_msg:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": "Cette vidéo n'est pas disponible (privée, supprimée ou restreinte géographiquement).",
+                    "code": "VIDEO_UNAVAILABLE"
+                }
+            )
+        elif "Private video" in error_msg:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": "Cette vidéo est privée et ne peut pas être téléchargée.",
+                    "code": "PRIVATE_VIDEO"
+                }
+            )
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": error_msg,
+                    "code": "EXTRACTION_ERROR"
+                }
+            )
+
+
+@app.post("/api/download")
+async def download_video(request: DownloadRequest, background_tasks: BackgroundTasks):
+    """Lance le téléchargement"""
+    
+    if not request.url or not request.format_id:
+        raise HTTPException(status_code=400, detail="URL ou format_id manquant")
+    
+    try:
+        download_id = str(__import__('uuid').uuid4())
+        output_dir = f"{DOWNLOADS_DIR}/{download_id}"
+        os.makedirs(output_dir, exist_ok=True)
+        
+        output_template = f"{output_dir}/%(title)s.%(ext)s"
+        
+        ydl_opts = get_yt_dlp_options(skip_download=False)
+        ydl_opts.update({
+            'format': request.format_id,
+            'outtmpl': output_template,
+            'writethumbnail': request.include_thumbnail,
+            'writesubtitles': request.include_subtitles,
+        })
+        
+        if request.extract_audio:
+            ydl_opts.update({
+                'postprocessors': [{
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'mp3',
+                    'preferredquality': '192',
+                }],
+                'format': 'bestaudio/best',
+            })
+        
+        print(f"[DEBUG] Lancement du téléchargement {download_id}")
+        background_tasks.add_task(run_download, ydl_opts, request.url, download_id)
+        
+        return {"status": "downloading", "download_id": download_id}
+        
     except Exception as e:
         raise HTTPException(status_code=400, detail=format_error(e))
 
-@app.post("/api/download")
-async def download_video(request: DownloadRequest):
-    """Lance le téléchargement et retourne le fichier"""
-    download_id = str(uuid.uuid4())
-    download_dir = f"downloads/{download_id}"
-    os.makedirs(download_dir, exist_ok=True)
-    
-    output_template = f"{download_dir}/%(title)s.%(ext)s"
-
-    # Utiliser un format sûr si le format demandé pose problème
-    format_spec = request.format_id if request.format_id else 'bestvideo+bestaudio/best'
-    
-    ydl_opts = {
-        'format': format_spec,
-        'outtmpl': output_template,
-        'writethumbnail': request.include_thumbnail,
-        'writesubtitles': request.include_subtitles,
-        'quiet': True,
-        'no_warnings': True,
-        'merge_output_format': 'mp4',  # Fusionner en MP4
-        'postprocessors': [{
-            'key': 'FFmpegVideoConvertor',
-            'preferedformat': 'mp4',
-        }] if not request.extract_audio else [],
-    }
-
-    if request.extract_audio:
-        ydl_opts.update({
-            'format': 'bestaudio/best',
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
-            }],
-        })
-
+def run_download(opts, url, download_id):
+    """Exécute le téléchargement en arrière-plan"""
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([request.url])
-        
-        # Trouver le fichier téléchargé
-        files = glob.glob(f"{download_dir}/*")
-        video_files = [f for f in files if not f.endswith(('.jpg', '.png', '.webp', '.vtt', '.srt'))]
-        
-        if not video_files:
-            raise HTTPException(status_code=500, detail=format_error(Exception("Fichier non trouvé après téléchargement")))
-        
-        file_path = video_files[0]
-        filename = os.path.basename(file_path)
-        
-        return {"status": "completed", "download_id": download_id, "filename": filename}
-        
-    except HTTPException:
-        raise
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            filename = ydl.prepare_filename(info)
+            print(f"[SUCCESS] Téléchargement {download_id} terminé: {filename}")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=format_error(e))
+        print(f"[ERROR] Erreur lors du téléchargement {download_id}: {str(e)}")
 
 @app.post("/api/download/playlist")
 async def download_playlist(request: PlaylistDownloadRequest):
