@@ -1,0 +1,18 @@
+# RedStream DL - Backend Dependencies
+# Install with: pip install -r requirements.txt
+
+# Web Framework
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+
+# Video Extraction
+yt-dlp>=2024.1.0
+
+# Data Validation (included with FastAPI but explicit)
+pydantic>=2.5.0
+
+# Optional: For better async support
+python-multipart>=0.0.6
+
+# Optional: For CORS handling (included with FastAPI)
+# starlette>=0.27.0

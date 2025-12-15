@@ -1,0 +1,62 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# ===== Python / Backend =====
+# Virtual Environment (NE PAS PUSH)
+venv/
+.venv/
+env/
+.env/
+ENV/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+
+# Downloads folder (fichiers temporaires)
+server/downloads/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Python eggs
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+parts/
+var/
+sdist/
+develop-eggs/
+
+# Pytest
+.pytest_cache/
+.coverage
+htmlcov/
