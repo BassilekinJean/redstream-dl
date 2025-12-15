@@ -72,22 +72,68 @@ choco install ffmpeg
 
 ## 🎮 Utilisation
 
-### Démarrer le Backend (Terminal 1)
+### Option 1: Développement local
+
+#### Démarrer le Backend (Terminal 1)
 
 ```bash
+source venv/bin/activate  # Activer l'environnement virtuel
 cd server
 uvicorn main:app --reload
 ```
 
 Le backend sera accessible sur `http://127.0.0.1:8000`
 
-### Démarrer le Frontend (Terminal 2)
+#### Démarrer le Frontend (Terminal 2)
 
 ```bash
 npm run dev
 ```
 
 Le frontend sera accessible sur `http://localhost:5173`
+
+### Option 2: Docker (Recommandé pour la production)
+
+```bash
+# Build et lancement
+docker-compose up --build
+
+# Ou en arrière-plan
+docker-compose up -d --build
+
+# Arrêter
+docker-compose down
+
+# Voir les logs
+docker-compose logs -f
+```
+
+L'application sera accessible sur `http://localhost`
+
+## 🐳 Architecture Docker
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    NGINX (Port 80)                      │
+│              Reverse Proxy + Static Files               │
+├─────────────────────────────────────────────────────────┤
+│     /              │           /api/*                   │
+│   Static React     │         Proxy to Backend           │
+│    (dist/)         │                                    │
+└────────┬───────────┴──────────────┬────────────────────┘
+         │                          │
+         │                          ▼
+         │              ┌───────────────────────┐
+         │              │  FastAPI (Port 8000)  │
+         │              │    + yt-dlp + FFmpeg  │
+         │              └───────────────────────┘
+         │                          │
+         │                          ▼
+         │              ┌───────────────────────┐
+         │              │  Volume: downloads/   │
+         │              │  (Nettoyage auto 30m) │
+         │              └───────────────────────┘
+```
 
 ## 📁 Structure du projet
 
@@ -96,7 +142,7 @@ redstream-dl/
 ├── server/                 # Backend FastAPI
 │   ├── main.py            # API principale
 │   ├── requirements.txt   # Dépendances Python
-│   └── downloads/         # Fichiers temporaires (gitignore)
+│   └── downloads/         # Fichiers temporaires (auto-nettoyés)
 ├── src/                   # Frontend React
 │   ├── App.jsx           # Composant principal
 │   ├── App.css           # Styles additionnels

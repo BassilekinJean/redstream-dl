@@ -19,6 +19,9 @@ import {
   Monitor
 } from 'lucide-react';
 
+// Configuration API - utilise l'URL relative en production (Docker)
+const API_BASE_URL = import.meta.env.VITE_API_URL || '';
+
 // --- Mock Data (Reste inchangé) ---
 const MOCK_VIDEO_DATA = {
   id: "dQw4w9WgXcQ",
@@ -226,7 +229,7 @@ export default function App() {
     setSelectedVideos(new Set());
 
     try {
-      const response = await fetch('http://127.0.0.1:8000/api/info', {
+      const response = await fetch(`${API_BASE_URL}/api/info`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url }),
@@ -267,7 +270,7 @@ export default function App() {
           .filter(e => selectedVideos.has(e.id))
           .map(e => e.url);
         
-        response = await fetch('http://127.0.0.1:8000/api/download/playlist', {
+        response = await fetch(`${API_BASE_URL}/api/download/playlist`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -280,7 +283,7 @@ export default function App() {
         });
       } else {
         // Téléchargement simple
-        response = await fetch('http://127.0.0.1:8000/api/download', {
+        response = await fetch(`${API_BASE_URL}/api/download`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -305,7 +308,7 @@ export default function App() {
         if (result.files && result.files.length > 0) {
           // Playlist: télécharger chaque fichier
           for (const filename of result.files) {
-            const downloadUrl = `http://127.0.0.1:8000/api/download/${result.download_id}/${encodeURIComponent(filename)}`;
+            const downloadUrl = `${API_BASE_URL}/api/download/${result.download_id}/${encodeURIComponent(filename)}`;
             const link = document.createElement('a');
             link.href = downloadUrl;
             link.download = filename;
@@ -316,7 +319,7 @@ export default function App() {
           }
         } else if (result.filename) {
           // Vidéo simple
-          const downloadUrl = `http://127.0.0.1:8000/api/download/${result.download_id}/${encodeURIComponent(result.filename)}`;
+          const downloadUrl = `${API_BASE_URL}/api/download/${result.download_id}/${encodeURIComponent(result.filename)}`;
           const link = document.createElement('a');
           link.href = downloadUrl;
           link.download = result.filename;

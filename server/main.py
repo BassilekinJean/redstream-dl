@@ -3,14 +3,72 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional
+from contextlib import asynccontextmanager
 import yt_dlp
 import os
 import uuid
 import glob
 import asyncio
 import traceback
+import shutil
+import time
+from datetime import datetime, timedelta
+import threading
 
-app = FastAPI(title="RedStream API")
+# ===== CONFIGURATION =====
+DOWNLOADS_DIR = "downloads"
+FILE_EXPIRY_MINUTES = 30  # Les fichiers sont supprimés après 30 minutes
+CLEANUP_INTERVAL_SECONDS = 300  # Vérification toutes les 5 minutes
+
+# Variable pour arrêter le thread de nettoyage
+cleanup_running = True
+
+def cleanup_old_downloads():
+    """Supprime les dossiers de téléchargement expirés"""
+    global cleanup_running
+    while cleanup_running:
+        try:
+            if os.path.exists(DOWNLOADS_DIR):
+                now = time.time()
+                expiry_seconds = FILE_EXPIRY_MINUTES * 60
+                
+                for folder_name in os.listdir(DOWNLOADS_DIR):
+                    folder_path = os.path.join(DOWNLOADS_DIR, folder_name)
+                    if os.path.isdir(folder_path):
+                        # Vérifier l'âge du dossier
+                        folder_age = now - os.path.getmtime(folder_path)
+                        if folder_age > expiry_seconds:
+                            try:
+                                shutil.rmtree(folder_path)
+                                print(f"[Cleanup] Supprimé: {folder_name} (âge: {folder_age/60:.1f} min)")
+                            except Exception as e:
+                                print(f"[Cleanup] Erreur suppression {folder_name}: {e}")
+        except Exception as e:
+            print(f"[Cleanup] Erreur générale: {e}")
+        
+        # Attendre avant la prochaine vérification
+        time.sleep(CLEANUP_INTERVAL_SECONDS)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Gestion du cycle de vie de l'application"""
+    global cleanup_running
+    
+    # Créer le dossier downloads s'il n'existe pas
+    os.makedirs(DOWNLOADS_DIR, exist_ok=True)
+    
+    # Démarrer le thread de nettoyage
+    cleanup_thread = threading.Thread(target=cleanup_old_downloads, daemon=True)
+    cleanup_thread.start()
+    print(f"[Startup] Nettoyage automatique activé (expiration: {FILE_EXPIRY_MINUTES} min)")
+    
+    yield
+    
+    # Arrêter le thread de nettoyage
+    cleanup_running = False
+    print("[Shutdown] Arrêt du nettoyage automatique")
+
+app = FastAPI(title="RedStream API", lifespan=lifespan)
 
 # Configuration CORS pour autoriser le frontend React
 app.add_middleware(

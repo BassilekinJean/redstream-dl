@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  # ===== Backend API =====
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: backend
+    container_name: redstream-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      # Volume temporaire pour les téléchargements (optionnel, pour persistance)
+      - downloads_data:/app/server/downloads
+    environment:
+      - PYTHONUNBUFFERED=1
+      - FILE_EXPIRY_MINUTES=30
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/docs"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - redstream-network
+
+  # ===== Frontend React =====
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: frontend
+    container_name: redstream-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - redstream-network
+
+networks:
+  redstream-network:
+    driver: bridge
+
+volumes:
+  downloads_data:
+    driver: local
