@@ -1,58 +1,62 @@
-# ===== BACKEND (Python/FastAPI) =====
-FROM python:3.11-slim AS backend
+# ===== STAGE 1: Backend =====
+FROM python:3.12-slim AS backend
 
-# Installer FFmpeg et dépendances système
-RUN apt-get update && apt-get install -y --no-install-recommends \
+WORKDIR /app/server
+
+# Installer les dépendances système pour yt-dlp
+RUN apt-get update && apt-get install -y \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# Créer le répertoire de travail
-WORKDIR /app/server
-
-# Copier et installer les dépendances Python
 COPY server/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copier le code backend
 COPY server/ .
 
-# Créer le dossier downloads
-RUN mkdir -p downloads
-
-# Exposer le port
-EXPOSE 8000
-
-# Commande de démarrage
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
-
-
-# ===== FRONTEND (Node.js/React) =====
+# ===== STAGE 2: Frontend Builder =====
 FROM node:20-alpine AS frontend-builder
 
 WORKDIR /app
 
-# Copier les fichiers de dépendances
 COPY package*.json ./
-
-# Installer les dépendances
 RUN npm ci
 
-# Copier le code source
 COPY . .
-
-# Build de production
 RUN npm run build
 
+# ===== STAGE 3: Production avec Nginx =====
+FROM nginx:alpine AS production
 
-# ===== NGINX pour servir le frontend =====
-FROM nginx:alpine AS frontend
+# Copier la config nginx
+COPY nginx.conf /etc/nginx/nginx.conf
 
-# Copier la configuration nginx
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-
-# Copier les fichiers buildés
+# Copier le frontend buildé
 COPY --from=frontend-builder /app/dist /usr/share/nginx/html
 
+# Copier le backend
+COPY --from=backend /app/server /app/server
+COPY --from=backend /usr/local/lib/python3.12 /usr/local/lib/python3.12
+COPY --from=backend /usr/local/bin/python3.12 /usr/local/bin/python3.12
+COPY --from=backend /usr/bin/ffmpeg /usr/bin/ffmpeg
+
+# Installer Python et supervisord dans l'image nginx
+RUN apk add --no-cache python3 py3-pip supervisor
+
+# Créer lien symbolique python
+RUN ln -sf /usr/bin/python3 /usr/bin/python
+
+# Installer les dépendances Python
+COPY server/requirements.txt /app/server/
+RUN pip3 install --no-cache-dir --break-system-packages -r /app/server/requirements.txt
+
+# Créer le dossier downloads
+RUN mkdir -p /app/server/downloads
+
+# Copier la config supervisord
+COPY supervisord.conf /etc/supervisord.conf
+
+# Exposer le port (Render utilise PORT)
 EXPOSE 80
 
-CMD ["nginx", "-g", "daemon off;"]
+# Lancer supervisord
+CMD ["supervisord", "-c", "/etc/supervisord.conf"]
