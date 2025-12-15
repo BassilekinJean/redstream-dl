@@ -410,6 +410,16 @@ async def download_playlist(request: PlaylistDownloadRequest):
         "errors": errors
     }
 
+@app.get("/api/health")
+async def health_check():
+    """Endpoint de vérification de santé pour Render/Docker"""
+    return {
+        "status": "healthy",
+        "service": "redstream-api",
+        "timestamp": datetime.now().isoformat()
+    }
+
+
 @app.get("/api/download/{download_id}/{filename}")
 async def get_file(download_id: str, filename: str):
     """Télécharge le fichier vers le navigateur"""
