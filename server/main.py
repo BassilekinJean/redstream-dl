@@ -12,6 +12,7 @@ import asyncio
 import traceback
 import shutil
 import time
+import subprocess
 from datetime import datetime, timedelta
 import threading
 
@@ -19,9 +20,49 @@ import threading
 DOWNLOADS_DIR = "downloads"
 FILE_EXPIRY_MINUTES = 30  # Les fichiers sont supprimés après 30 minutes
 CLEANUP_INTERVAL_SECONDS = 300  # Vérification toutes les 5 minutes
+YT_DLP_UPDATE_INTERVAL_HOURS = 24  # Mise à jour yt-dlp toutes les 24 heures
 
-# Variable pour arrêter le thread de nettoyage
+# Variable pour arrêter les threads
 cleanup_running = True
+
+def update_yt_dlp():
+    """Met à jour yt-dlp vers la dernière version"""
+    global cleanup_running
+    
+    # Première mise à jour au démarrage
+    try:
+        print("[yt-dlp] Vérification de la version...")
+        result = subprocess.run(
+            ["pip", "install", "--upgrade", "yt-dlp"],
+            capture_output=True,
+            text=True
+        )
+        if "Successfully installed" in result.stdout:
+            print(f"[yt-dlp] Mis à jour avec succès!")
+        else:
+            print(f"[yt-dlp] Déjà à jour")
+    except Exception as e:
+        print(f"[yt-dlp] Erreur mise à jour initiale: {e}")
+    
+    # Boucle de mise à jour périodique
+    update_interval_seconds = YT_DLP_UPDATE_INTERVAL_HOURS * 3600
+    while cleanup_running:
+        time.sleep(update_interval_seconds)
+        if not cleanup_running:
+            break
+        try:
+            print(f"[yt-dlp] Mise à jour automatique ({datetime.now().strftime('%Y-%m-%d %H:%M')})...")
+            result = subprocess.run(
+                ["pip", "install", "--upgrade", "yt-dlp"],
+                capture_output=True,
+                text=True
+            )
+            if "Successfully installed" in result.stdout:
+                print(f"[yt-dlp] Mis à jour avec succès!")
+            else:
+                print(f"[yt-dlp] Déjà à jour")
+        except Exception as e:
+            print(f"[yt-dlp] Erreur mise à jour: {e}")
 
 def cleanup_old_downloads():
     """Supprime les dossiers de téléchargement expirés"""
@@ -62,11 +103,16 @@ async def lifespan(app: FastAPI):
     cleanup_thread.start()
     print(f"[Startup] Nettoyage automatique activé (expiration: {FILE_EXPIRY_MINUTES} min)")
     
+    # Démarrer le thread de mise à jour yt-dlp
+    update_thread = threading.Thread(target=update_yt_dlp, daemon=True)
+    update_thread.start()
+    print(f"[Startup] Mise à jour automatique yt-dlp activée (intervalle: {YT_DLP_UPDATE_INTERVAL_HOURS}h)")
+    
     yield
     
-    # Arrêter le thread de nettoyage
+    # Arrêter les threads
     cleanup_running = False
-    print("[Shutdown] Arrêt du nettoyage automatique")
+    print("[Shutdown] Arrêt des tâches automatiques")
 
 app = FastAPI(title="RedStream API", lifespan=lifespan)
 
